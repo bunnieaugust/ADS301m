@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import LearningView from './components/LearningView';
 import QuizView from './components/QuizView';
 import ResultsView from './components/ResultsView';
@@ -8,7 +8,13 @@ import LoginView from './components/LoginView';
 import Header from './components/Header';
 import SettingsView from './components/SettingsView';
 import { allLearningContent, allQuizQuestions, availableSessions } from './constants';
-import { Session, User } from './types';
+import { Session, User, QuestionType } from './types';
+import Card from './components/Card';
+
+interface QuizSettings {
+  shuffle: boolean;
+  type: 'all' | 'multiple_choice' | 'fill_in_the_blank';
+}
 
 const App: React.FC = () => {
   type AppView = 'login' | 'app' | 'settings';
@@ -19,8 +25,10 @@ const App: React.FC = () => {
   
   const [user, setUser] = useState<User | null>(null);
   const [score, setScore] = useState(0);
+  const [lastQuizTotal, setLastQuizTotal] = useState(0);
   const [bestScore, setBestScore] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<number>(availableSessions[0].id);
+  const [quizSettings, setQuizSettings] = useState<QuizSettings>({ shuffle: true, type: 'all' });
 
   useEffect(() => {
     const storedUser = localStorage.getItem('currentUser');
@@ -100,8 +108,9 @@ const App: React.FC = () => {
     }
   }, [user, selectedSessionId]);
 
-  const handleQuizComplete = useCallback((finalScore: number) => {
+  const handleQuizComplete = useCallback((finalScore: number, totalQuestionsInQuiz: number) => {
     setScore(finalScore);
+    setLastQuizTotal(totalQuestionsInQuiz);
     setCurrentView('results');
     clearQuizState(); // Clear saved progress upon completion
 
@@ -133,6 +142,17 @@ const App: React.FC = () => {
     setCurrentView('quiz');
   };
   
+  const filteredQuestions = useMemo(() => {
+    const currentQuestions = allQuizQuestions[selectedSessionId] || [];
+    if (quizSettings.type === 'multiple_choice') {
+      return currentQuestions.filter(q => q.type === QuestionType.MULTIPLE_CHOICE);
+    }
+    if (quizSettings.type === 'fill_in_the_blank') {
+      return currentQuestions.filter(q => q.type === QuestionType.FILL_IN_THE_BLANK);
+    }
+    return currentQuestions;
+  }, [selectedSessionId, quizSettings.type]);
+  
   const renderHome = () => (
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-150px)] p-4 text-center">
       <div className="max-w-3xl">
@@ -155,8 +175,34 @@ const App: React.FC = () => {
             Quiz for Session {selectedSessionId}
           </button>
         </div>
+
+        <div className="mt-6 max-w-lg mx-auto">
+            <Card className="bg-slate-800/50 !p-4">
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                        <label className="text-slate-300 font-semibold">Question Types</label>
+                        <div className="inline-flex rounded-md shadow-sm" role="group">
+                            <button type="button" onClick={() => setQuizSettings(s => ({...s, type: 'all'}))} className={`px-3 py-1 text-sm font-medium rounded-l-lg transition-colors ${quizSettings.type === 'all' ? 'bg-amber-500 text-slate-900' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}>All</button>
+                            <button type="button" onClick={() => setQuizSettings(s => ({...s, type: 'multiple_choice'}))} className={`px-3 py-1 text-sm font-medium transition-colors border-x border-slate-600 ${quizSettings.type === 'multiple_choice' ? 'bg-amber-500 text-slate-900' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}>MC</button>
+                            <button type="button" onClick={() => setQuizSettings(s => ({...s, type: 'fill_in_the_blank'}))} className={`px-3 py-1 text-sm font-medium rounded-r-lg transition-colors ${quizSettings.type === 'fill_in_the_blank' ? 'bg-amber-500 text-slate-900' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}>Text</button>
+                        </div>
+                    </div>
+                    <div className="flex justify-between items-center">
+                         <label htmlFor="shuffle-toggle" className="text-slate-300 font-semibold">Shuffle Questions</label>
+                         <label htmlFor="shuffle-toggle" className="flex items-center cursor-pointer">
+                            <div className="relative">
+                                <input id="shuffle-toggle" type="checkbox" className="sr-only" checked={quizSettings.shuffle} onChange={e => setQuizSettings(s => ({...s, shuffle: e.target.checked}))} />
+                                <div className="block bg-slate-600 w-14 h-8 rounded-full"></div>
+                                <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${quizSettings.shuffle ? 'translate-x-6 bg-amber-400' : ''}`}></div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            </Card>
+        </div>
+
         <p className="mt-4 text-slate-400">
-          {bestScore !== null ? `Your best score: ${bestScore} / ${allQuizQuestions[selectedSessionId].length}` : 'Take the quiz to set a high score!'}
+          {bestScore !== null ? `Your best score: ${bestScore} / ${filteredQuestions.length}` : `Take the quiz (${filteredQuestions.length} questions) to set a high score!`}
         </p>
       </div>
     </div>
@@ -178,9 +224,10 @@ const App: React.FC = () => {
                   onQuizComplete={handleQuizComplete}
                   userId={user.id}
                   sessionId={selectedSessionId}
+                  settings={quizSettings}
                 />;
       case 'results':
-        return <ResultsView score={score} totalQuestions={currentQuizQuestions.length} onRestart={handleRestart} />;
+        return <ResultsView score={score} totalQuestions={lastQuizTotal} onRestart={handleRestart} />;
       default:
         return renderHome();
     }

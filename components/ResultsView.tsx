@@ -9,7 +9,7 @@ interface ResultsViewProps {
 }
 
 const ResultsView: React.FC<ResultsViewProps> = ({ score, totalQuestions, onRestart }) => {
-  const percentage = useMemo(() => Math.round((score / totalQuestions) * 100), [score, totalQuestions]);
+  const percentage = useMemo(() => totalQuestions > 0 ? Math.round((score / totalQuestions) * 100) : 0, [score, totalQuestions]);
 
   const getFeedback = () => {
     if (percentage >= 90) return { message: "Excellent!", className: "text-green-400" };
@@ -21,7 +21,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ score, totalQuestions, onRest
   const feedback = getFeedback();
 
   return (
-    <div className="container mx-auto max-w-2xl flex items-center justify-center min-h-screen p-4">
+    <div className="container mx-auto max-w-2xl flex items-center justify-center min-h-[calc(100vh-200px)] p-4">
       <Card>
         <div className="text-center">
           <h1 className="text-4xl font-bold text-amber-400">Quiz Complete!</h1>
@@ -38,7 +38,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ score, totalQuestions, onRest
             onClick={onRestart}
             className="mt-10 px-10 py-4 bg-amber-500 text-slate-900 font-bold rounded-lg hover:bg-amber-400 transition-colors duration-300 shadow-lg text-xl"
           >
-            Try Again
+            Back to Home
           </button>
         </div>
       </Card>
