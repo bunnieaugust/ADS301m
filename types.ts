@@ -1,3 +1,4 @@
+
 export enum QuestionType {
   MULTIPLE_CHOICE = 'MULTIPLE_CHOICE',
   FILL_IN_THE_BLANK = 'FILL_IN_THE_BLANK',
@@ -35,4 +36,12 @@ export interface Session {
 export interface SessionInfo {
   id: number;
   title: string;
+}
+
+export interface User {
+  id: string;
+  nickname: string;
+  password?: string;
+  email?: string;
+  phone?: string;
 }

@@ -1,112 +1,163 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Question, QuestionType } from '../types';
 import Card from './Card';
 
 interface QuizViewProps {
   questions: Question[];
   onQuizComplete: (score: number) => void;
+  userId: string;
+  sessionId: number;
 }
 
-const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete }) => {
-  const [mainQuestionIndex, setMainQuestionIndex] = useState(0);
-  const [activeQuestion, setActiveQuestion] = useState<Question>(questions[0]);
-  
-  const [retryQueue, setRetryQueue] = useState<Question[]>([]);
-  const [currentRetryBatch, setCurrentRetryBatch] = useState<Question[]>([]);
-  const [currentRetryIndex, setCurrentRetryIndex] = useState(0);
-  
-  const [specialRetryBatch, setSpecialRetryBatch] = useState<Question[]>([]);
-  const [specialRetryIndex, setSpecialRetryIndex] = useState(0);
+interface QuizState {
+  mainQuestionIndex: number;
+  retryQueue: Question[];
+  currentRetryBatch: Question[];
+  currentRetryIndex: number;
+  specialRetryBatch: Question[];
+  specialRetryIndex: number;
+  correctlyAnsweredIds: number[];
+  correctAnswersSinceLastRetry: number;
+}
 
-  const [correctlyAnsweredIds, setCorrectlyAnsweredIds] = useState<Set<number>>(new Set());
-  const [correctAnswersSinceLastRetry, setCorrectAnswersSinceLastRetry] = useState(0);
-  
+const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete, userId, sessionId }) => {
+  const storageKey = useMemo(() => `quizState_${userId}_${sessionId}`, [userId, sessionId]);
+
+  const getInitialState = (): QuizState => {
+    const savedState = localStorage.getItem(storageKey);
+    if (savedState) {
+      const parsedState = JSON.parse(savedState);
+      // Rehydrate questions from props to avoid stale data
+      const getQuestionById = (id: number) => questions.find(q => q.id === id);
+      return {
+        ...parsedState,
+        retryQueue: parsedState.retryQueue.map(getQuestionById).filter(Boolean),
+        currentRetryBatch: parsedState.currentRetryBatch.map(getQuestionById).filter(Boolean),
+        specialRetryBatch: parsedState.specialRetryBatch.map(getQuestionById).filter(Boolean),
+      };
+    }
+    return {
+      mainQuestionIndex: 0,
+      retryQueue: [],
+      currentRetryBatch: [],
+      currentRetryIndex: 0,
+      specialRetryBatch: [],
+      specialRetryIndex: 0,
+      correctlyAnsweredIds: [],
+      correctAnswersSinceLastRetry: 0,
+    };
+  };
+
+  const [state, setState] = useState<QuizState>(getInitialState);
+  const [activeQuestion, setActiveQuestion] = useState<Question>(questions[0]);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [feedback, setFeedback] = useState<{ correct: boolean; message: string } | null>(null);
-  
-  // Reset state when questions prop changes (new session starts)
+
   useEffect(() => {
-    setMainQuestionIndex(0);
-    setActiveQuestion(questions[0]);
-    setRetryQueue([]);
-    setCurrentRetryBatch([]);
-    setCurrentRetryIndex(0);
-    setSpecialRetryBatch([]);
-    setSpecialRetryIndex(0);
-    setCorrectlyAnsweredIds(new Set());
-    setCorrectAnswersSinceLastRetry(0);
-    setSelectedAnswer(null);
-    setInputValue('');
-    setFeedback(null);
-  }, [questions]);
+    // Save state to local storage on every change
+    // We store question IDs instead of full objects to keep storage light
+    const stateToSave = {
+      ...state,
+      retryQueue: state.retryQueue.map(q => q.id),
+      currentRetryBatch: state.currentRetryBatch.map(q => q.id),
+      specialRetryBatch: state.specialRetryBatch.map(q => q.id),
+    };
+    localStorage.setItem(storageKey, JSON.stringify(stateToSave));
+  }, [state, storageKey]);
+
+  useEffect(() => {
+    // When the component initializes or questions change, determine the active question from the state
+    const { mainQuestionIndex, currentRetryBatch, currentRetryIndex, specialRetryBatch, specialRetryIndex } = state;
+    
+    let currentQ: Question | undefined;
+    if (specialRetryBatch.length > 0) {
+      currentQ = specialRetryBatch[specialRetryIndex];
+    } else if (currentRetryBatch.length > 0) {
+      currentQ = currentRetryBatch[currentRetryIndex];
+    } else if (mainQuestionIndex < questions.length) {
+      currentQ = questions[mainQuestionIndex];
+    }
+
+    if (currentQ) {
+      setActiveQuestion(currentQ);
+    } else {
+      // If no question is found (e.g., state is out of sync), finish the quiz.
+      onQuizComplete(state.correctlyAnsweredIds.length);
+    }
+  }, [state, questions, onQuizComplete]);
+  
 
   const moveToNextQuestion = useCallback(() => {
     setFeedback(null);
     setSelectedAnswer(null);
     setInputValue('');
 
-    // Phase 1: Are we IN a special bonus retry batch?
-    if (specialRetryBatch.length > 0) {
-      const nextSpecialIndex = specialRetryIndex + 1;
-      if (nextSpecialIndex < specialRetryBatch.length) {
-        setSpecialRetryIndex(nextSpecialIndex);
-        setActiveQuestion(specialRetryBatch[nextSpecialIndex]);
-        return;
-      } else {
-        setSpecialRetryBatch([]);
-        setSpecialRetryIndex(0);
+    setState(prevState => {
+      let newState = { ...prevState };
+
+      // Phase 1: In a special bonus retry batch?
+      if (newState.specialRetryBatch.length > 0) {
+        const nextSpecialIndex = newState.specialRetryIndex + 1;
+        if (nextSpecialIndex < newState.specialRetryBatch.length) {
+          newState.specialRetryIndex = nextSpecialIndex;
+          return newState;
+        } else {
+          newState.specialRetryBatch = [];
+          newState.specialRetryIndex = 0;
+        }
       }
-    }
-
-    // Phase 2: Have we earned a bonus retry batch? (Check before advancing)
-    const inMainQuiz = mainQuestionIndex < questions.length;
-    if (inMainQuiz && correctAnswersSinceLastRetry >= 8 && retryQueue.length > 0) {
-      const newSpecialBatch = retryQueue.slice(0, 3);
-      setSpecialRetryBatch(newSpecialBatch);
-      setSpecialRetryIndex(0);
-      setActiveQuestion(newSpecialBatch[0]);
-      setCorrectAnswersSinceLastRetry(prev => prev - 8);
-      return;
-    }
-
-    // Phase 3: Are we in the FINAL retry loop (post-main quiz)?
-    if (currentRetryBatch.length > 0) {
-      const nextRetryIndex = currentRetryIndex + 1;
-      if (nextRetryIndex < currentRetryBatch.length) {
-        setCurrentRetryIndex(nextRetryIndex);
-        setActiveQuestion(currentRetryBatch[nextRetryIndex]);
-        return;
-      } else {
-        setCurrentRetryBatch([]);
-        setCurrentRetryIndex(0);
+      
+      // Phase 2: Earned a bonus retry batch?
+      const inMainQuiz = newState.mainQuestionIndex < questions.length;
+      if (inMainQuiz && newState.correctAnswersSinceLastRetry >= 8 && newState.retryQueue.length > 0) {
+        newState.specialRetryBatch = newState.retryQueue.slice(0, 3);
+        newState.specialRetryIndex = 0;
+        newState.correctAnswersSinceLastRetry -= 8;
+        return newState;
       }
-    }
 
-    // Phase 4: Advance the main quiz
-    const nextMainIndex = mainQuestionIndex + 1;
-    if (nextMainIndex < questions.length) {
-      setMainQuestionIndex(nextMainIndex);
-      setActiveQuestion(questions[nextMainIndex]);
-      return;
-    }
+      // Phase 3: In the FINAL retry loop?
+      if (newState.currentRetryBatch.length > 0) {
+        const nextRetryIndex = newState.currentRetryIndex + 1;
+        if (nextRetryIndex < newState.currentRetryBatch.length) {
+          newState.currentRetryIndex = nextRetryIndex;
+          return newState;
+        } else {
+          newState.currentRetryBatch = [];
+          newState.currentRetryIndex = 0;
+        }
+      }
 
-    // Phase 5: Main quiz is done, check if we need to start the FINAL retry loop
-    if (retryQueue.length > 0) {
-      const nextBatch = retryQueue.slice(0, 5);
-      setCurrentRetryBatch(nextBatch);
-      setCurrentRetryIndex(0);
-      setActiveQuestion(nextBatch[0]);
-      return;
-    }
+      // Phase 4: Advance the main quiz
+      const nextMainIndex = newState.mainQuestionIndex + 1;
+      if (nextMainIndex < questions.length) {
+        newState.mainQuestionIndex = nextMainIndex;
+        return newState;
+      }
+      if (newState.mainQuestionIndex < questions.length) { // Ensure index is updated if not already at the end
+          newState.mainQuestionIndex = nextMainIndex;
+      }
 
-    // Phase 6: Everything is done
-    onQuizComplete(correctlyAnsweredIds.size);
-  }, [
-    mainQuestionIndex, questions, retryQueue, onQuizComplete, correctlyAnsweredIds.size,
-    correctAnswersSinceLastRetry, specialRetryBatch, specialRetryIndex,
-    currentRetryBatch, currentRetryIndex
-  ]);
+      // Phase 5: Main quiz done, start FINAL retry loop?
+      if (newState.retryQueue.length > 0) {
+        newState.currentRetryBatch = newState.retryQueue.slice(0, 5);
+        newState.currentRetryIndex = 0;
+        return newState;
+      }
+
+      // If we get here, everything is done. The effect will trigger completion.
+      return newState;
+    });
+  }, [questions.length]);
+  
+  // Effect to handle quiz completion
+  useEffect(() => {
+      const { mainQuestionIndex, retryQueue, specialRetryBatch, currentRetryBatch } = state;
+      if (mainQuestionIndex >= questions.length && retryQueue.length === 0 && specialRetryBatch.length === 0 && currentRetryBatch.length === 0) {
+          onQuizComplete(state.correctlyAnsweredIds.length);
+      }
+  }, [state, questions.length, onQuizComplete]);
 
   const handleSubmit = useCallback(() => {
     if (feedback) return;
@@ -115,25 +166,22 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete }) => {
     const isCorrect = answer?.toLowerCase() === activeQuestion.correctAnswer.toLowerCase();
 
     if (isCorrect) {
-      if (!correctlyAnsweredIds.has(activeQuestion.id)) {
-        setCorrectlyAnsweredIds(prev => new Set(prev).add(activeQuestion.id));
-      }
-      setCorrectAnswersSinceLastRetry(prev => prev + 1);
-      setRetryQueue(prev => prev.filter(q => q.id !== activeQuestion.id));
+      setState(prev => ({
+          ...prev,
+          correctlyAnsweredIds: prev.correctlyAnsweredIds.includes(activeQuestion.id) ? prev.correctlyAnsweredIds : [...prev.correctlyAnsweredIds, activeQuestion.id],
+          correctAnswersSinceLastRetry: prev.correctAnswersSinceLastRetry + 1,
+          retryQueue: prev.retryQueue.filter(q => q.id !== activeQuestion.id),
+      }));
       setFeedback({ correct: true, message: 'Correct!' });
-      setTimeout(() => {
-        moveToNextQuestion();
-      }, 1000);
+      setTimeout(moveToNextQuestion, 1000);
     } else {
-      setRetryQueue(prev => {
-        if (prev.find(q => q.id === activeQuestion.id)) {
-          return prev;
-        }
-        return [...prev, activeQuestion];
-      });
+      setState(prev => ({
+          ...prev,
+          retryQueue: prev.retryQueue.find(q => q.id === activeQuestion.id) ? prev.retryQueue : [...prev.retryQueue, activeQuestion],
+      }));
       setFeedback({ correct: false, message: `The correct answer is: ${activeQuestion.correctAnswer}` });
     }
-  }, [feedback, activeQuestion, selectedAnswer, inputValue, correctlyAnsweredIds, moveToNextQuestion]);
+  }, [feedback, activeQuestion, selectedAnswer, inputValue, moveToNextQuestion]);
 
   const renderMultipleChoice = () => {
     const mcQuestion = activeQuestion as Extract<Question, { type: QuestionType.MULTIPLE_CHOICE }>;
@@ -179,20 +227,20 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete }) => {
     );
   };
 
-  const isQuizFinished = mainQuestionIndex >= questions.length - 1 && retryQueue.length === 0 && specialRetryBatch.length === 0;
+  const isQuizFinished = state.mainQuestionIndex >= questions.length && state.retryQueue.length === 0 && state.specialRetryBatch.length === 0;
   
   return (
     <div className="container mx-auto max-w-3xl flex items-center justify-center min-h-screen p-4">
       <Card>
         <div className="mb-6">
-           {specialRetryBatch.length > 0 ? (
-            <p className="text-cyan-400 font-bold">Bonus Retry! ({specialRetryIndex + 1} of {specialRetryBatch.length})</p>
-           ) : currentRetryBatch.length > 0 ? (
-            <p className="text-yellow-400 font-bold">Retry Question {currentRetryIndex + 1} of {currentRetryBatch.length} (Total remaining: {retryQueue.length})</p>
+           {state.specialRetryBatch.length > 0 ? (
+            <p className="text-cyan-400 font-bold">Bonus Retry! ({state.specialRetryIndex + 1} of {state.specialRetryBatch.length})</p>
+           ) : state.currentRetryBatch.length > 0 ? (
+            <p className="text-yellow-400 font-bold">Retry Question {state.currentRetryIndex + 1} of {state.currentRetryBatch.length} (Total remaining: {state.retryQueue.length})</p>
            ) : (
-            <p className="text-amber-400 font-bold">Question {mainQuestionIndex + 1} of {questions.length}</p>
+            <p className="text-amber-400 font-bold">Question {state.mainQuestionIndex + 1} of {questions.length}</p>
            )}
-           <p className="text-slate-300 text-sm mt-1">Correct answers for next retry: {correctAnswersSinceLastRetry} / 8</p>
+           <p className="text-slate-300 text-sm mt-1">Correct answers for next retry: {state.correctAnswersSinceLastRetry} / 8</p>
           <h2 className="text-2xl mt-2">{activeQuestion.questionText}</h2>
         </div>
         
