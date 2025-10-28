@@ -41,32 +41,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete }) => {
     setFeedback(null);
   }, [questions]);
 
-
-  const handleSubmit = useCallback(() => {
-    if (feedback) return;
-
-    const answer = activeQuestion.type === QuestionType.MULTIPLE_CHOICE ? selectedAnswer : inputValue.trim().toLowerCase();
-    const isCorrect = answer?.toLowerCase() === activeQuestion.correctAnswer.toLowerCase();
-
-    if (isCorrect) {
-      if (!correctlyAnsweredIds.has(activeQuestion.id)) {
-        setCorrectlyAnsweredIds(prev => new Set(prev).add(activeQuestion.id));
-      }
-      setCorrectAnswersSinceLastRetry(prev => prev + 1);
-      setRetryQueue(prev => prev.filter(q => q.id !== activeQuestion.id));
-      setFeedback({ correct: true, message: 'Correct!' });
-    } else {
-      setRetryQueue(prev => {
-        if (prev.find(q => q.id === activeQuestion.id)) {
-          return prev;
-        }
-        return [...prev, activeQuestion];
-      });
-      setFeedback({ correct: false, message: `The correct answer is: ${activeQuestion.correctAnswer}` });
-    }
-  }, [feedback, activeQuestion, selectedAnswer, inputValue, correctlyAnsweredIds]);
-
-  const handleNext = useCallback(() => {
+  const moveToNextQuestion = useCallback(() => {
     setFeedback(null);
     setSelectedAnswer(null);
     setInputValue('');
@@ -132,6 +107,33 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete }) => {
     correctAnswersSinceLastRetry, specialRetryBatch, specialRetryIndex,
     currentRetryBatch, currentRetryIndex
   ]);
+
+  const handleSubmit = useCallback(() => {
+    if (feedback) return;
+
+    const answer = activeQuestion.type === QuestionType.MULTIPLE_CHOICE ? selectedAnswer : inputValue.trim().toLowerCase();
+    const isCorrect = answer?.toLowerCase() === activeQuestion.correctAnswer.toLowerCase();
+
+    if (isCorrect) {
+      if (!correctlyAnsweredIds.has(activeQuestion.id)) {
+        setCorrectlyAnsweredIds(prev => new Set(prev).add(activeQuestion.id));
+      }
+      setCorrectAnswersSinceLastRetry(prev => prev + 1);
+      setRetryQueue(prev => prev.filter(q => q.id !== activeQuestion.id));
+      setFeedback({ correct: true, message: 'Correct!' });
+      setTimeout(() => {
+        moveToNextQuestion();
+      }, 1000);
+    } else {
+      setRetryQueue(prev => {
+        if (prev.find(q => q.id === activeQuestion.id)) {
+          return prev;
+        }
+        return [...prev, activeQuestion];
+      });
+      setFeedback({ correct: false, message: `The correct answer is: ${activeQuestion.correctAnswer}` });
+    }
+  }, [feedback, activeQuestion, selectedAnswer, inputValue, correctlyAnsweredIds, moveToNextQuestion]);
 
   const renderMultipleChoice = () => {
     const mcQuestion = activeQuestion as Extract<Question, { type: QuestionType.MULTIPLE_CHOICE }>;
@@ -213,8 +215,9 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete }) => {
             </button>
           ) : (
             <button 
-              onClick={handleNext} 
-              className="px-8 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-500 transition-colors duration-300"
+              onClick={moveToNextQuestion}
+              disabled={feedback.correct} 
+              className="px-8 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-500 disabled:bg-slate-600 disabled:cursor-wait transition-colors duration-300"
             >
               {isQuizFinished ? 'Finish Quiz' : 'Next Question'}
             </button>
