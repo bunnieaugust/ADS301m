@@ -131,6 +131,10 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete, userId, 
                 setFeedback(null);
                 setInputValue('');
             }, 1000);
+        } else { // Auto-progress on correct answers for main and final_retry phases
+            setTimeout(() => {
+                moveToNextQuestion();
+            }, 1000);
         }
     } else { // Incorrect Answer
         if (phase === 'main') {
@@ -163,7 +167,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete, userId, 
             }, 1500);
         }
     }
-}, [feedback, activeQuestion, selectedAnswer, inputValue, phase, fibLockdownQueue, incorrectFIB, incorrectMC, currentIndex]);
+}, [feedback, activeQuestion, selectedAnswer, inputValue, phase, fibLockdownQueue, incorrectFIB, incorrectMC, currentIndex, moveToNextQuestion]);
 
 
   if (!activeQuestion) {
@@ -248,8 +252,8 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete, userId, 
               Submit Answer
             </button>
           ) : (
-            // The 'Next' button is only shown when there is feedback and we are NOT in lockdown mode (which auto-progresses)
-            phase !== 'fib_lockdown' && (
+            // The 'Next' button is only shown for incorrect answers when not in auto-progressing modes.
+            !feedback.correct && phase !== 'fib_lockdown' && (
               <button 
                 onClick={moveToNextQuestion}
                 className="px-8 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-500 transition-colors duration-300"
