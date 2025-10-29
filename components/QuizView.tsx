@@ -16,7 +16,7 @@ interface QuizViewProps {
 }
 
 type QuizPhase = 'main' | 'bonus_retry' | 'lockdown' | 'finished';
-const BONUS_RETRY_THRESHOLD = 7;
+const BONUS_RETRY_THRESHOLD = 8;
 const BONUS_RETRY_COUNT = 3;
 const LOCKDOWN_THRESHOLD = 4;
 
@@ -82,8 +82,8 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete, userId, 
             setPhase('main');
             setBonusRetryQueue([]);
             setBonusIndex(0);
-            setMainIndex(prev => prev + 1);
-            return; 
+             // Stay on the same main question index, the bonus round was an interruption
+             currentQ = quizQuestions[mainIndex];
         } else {
             currentQ = bonusRetryQueue[bonusIndex];
         }
@@ -151,7 +151,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete, userId, 
             
             setTimeout(() => {
                 if (newCorrectCount >= BONUS_RETRY_THRESHOLD && allIncorrect.length > 0) {
-                    setCorrectAnswersSinceBonus(0);
+                    setCorrectAnswersSinceBonus(prev => prev - BONUS_RETRY_THRESHOLD);
                     const questionsForBonus = allIncorrect.slice(0, BONUS_RETRY_COUNT);
                     setBonusRetryQueue(questionsForBonus);
                     setBonusIndex(0);
@@ -163,35 +163,30 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete, userId, 
                     setCorrectAnswersSinceBonus(newCorrectCount);
                     moveToNextQuestion();
                 }
-            }, 1000);
+            }, 1200);
         } else if (phase === 'bonus_retry' || phase === 'lockdown') {
-            // Remove from incorrect list upon correct answer in a retry mode
             setIncorrectMC(prev => prev.filter(q => q.id !== activeQuestion.id));
             setIncorrectFIB(prev => prev.filter(q => q.id !== activeQuestion.id));
-            
-            setTimeout(() => {
-                moveToNextQuestion();
-            }, 1000);
+            setTimeout(moveToNextQuestion, 1000);
         }
     } else { // Incorrect Answer
         if (phase === 'main') {
             const isNewIncorrect = !incorrectMC.some(q => q.id === activeQuestion.id) && !incorrectFIB.some(q => q.id === activeQuestion.id);
 
             if (isNewIncorrect) {
-                const updatedIncorrectMC = activeQuestion.type === QuestionType.MULTIPLE_CHOICE ? [...incorrectMC, activeQuestion] : incorrectMC;
-                const updatedIncorrectFIB = activeQuestion.type === QuestionType.FILL_IN_THE_BLANK ? [...incorrectFIB, activeQuestion] : incorrectFIB;
-                setIncorrectMC(updatedIncorrectMC);
-                setIncorrectFIB(updatedIncorrectFIB);
+                const updatedMC = activeQuestion.type === QuestionType.MULTIPLE_CHOICE ? [...incorrectMC, activeQuestion] : incorrectMC;
+                const updatedFIB = activeQuestion.type === QuestionType.FILL_IN_THE_BLANK ? [...incorrectFIB, activeQuestion] : incorrectFIB;
+                setIncorrectMC(updatedMC);
+                setIncorrectFIB(updatedFIB);
 
-                if (updatedIncorrectMC.length + updatedIncorrectFIB.length > LOCKDOWN_THRESHOLD) {
-                    setLockdownQueue([...updatedIncorrectMC, ...updatedIncorrectFIB]);
+                if (updatedMC.length + updatedFIB.length > LOCKDOWN_THRESHOLD) {
+                    setLockdownQueue([...updatedMC, ...updatedFIB]);
                     setPhase('lockdown');
                     setLockdownTriggered(true);
-                    return;
+                    return; 
                 }
             }
         }
-        // If incorrect in 'bonus_retry' or 'lockdown', do nothing, user must click "Try Again"
     }
 }, [feedback, activeQuestion, selectedAnswer, inputValue, phase, correctAnswersSinceBonus, incorrectMC, incorrectFIB, moveToNextQuestion]);
 
@@ -274,16 +269,17 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete, userId, 
                 </button>
             );
         }
-        if (phase === 'bonus_retry' || phase === 'lockdown') {
+        if (phase === 'lockdown') {
             return (
                 <button onClick={handleTryAgain} className="px-8 py-3 bg-yellow-600 text-white font-bold rounded-lg hover:bg-yellow-500 transition-colors duration-300">
                     Try Again
                 </button>
             );
         }
+        // For 'main' and 'bonus_retry' incorrect answers
         return (
             <button onClick={moveToNextQuestion} className="px-8 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-500 transition-colors duration-300">
-                Next
+                Next Question
             </button>
         );
     }
@@ -295,9 +291,16 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onQuizComplete, userId, 
     );
   };
 
+  const totalIncorrect = incorrectMC.length + incorrectFIB.length;
+
   return (
     <div className="container mx-auto max-w-3xl flex items-center justify-center min-h-[calc(100vh-200px)] p-4">
       <Card>
+        <div className="flex justify-between text-sm text-slate-400 mb-4 border-b border-slate-700 pb-3">
+            <span>Correct for Bonus: <strong className="text-green-400 font-mono text-base">{correctAnswersSinceBonus} / {BONUS_RETRY_THRESHOLD}</strong></span>
+            <span>Incorrect for Lockdown: <strong className="text-red-400 font-mono text-base">{totalIncorrect} / {LOCKDOWN_THRESHOLD + 1}</strong></span>
+        </div>
+
         <div className="mb-6">
            <p className="text-amber-400 font-bold">{getProgressText()}</p>
           <h2 className="text-2xl mt-2">{activeQuestion.questionText}</h2>
